@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import time
 
-import gym
+import gymnasium as gym
 import torch.nn as nn
 from torch import Tensor
 from torch.distributions.normal import Normal
@@ -380,7 +380,7 @@ class AgentPPO(AgentBase):
 
 class PendulumEnv(gym.Wrapper):  # a demo of custom gym env
     def __init__(self):
-        gym.logger.set_level(40)  # Block warning
+        gym.logger.min_level = 40  # Block warning
         gym_env_name = "Pendulum-v0" if gym.__version__ < "0.18.0" else "Pendulum-v1"
         super().__init__(env=gym.make(gym_env_name))
 

@@ -47,12 +47,14 @@ class YahooDownloader:
         # Download and save the data in a pandas DataFrame:
         data_df = pd.DataFrame()
         num_failures = 0
+        if hasattr(yf, "set_config"):
+            yf.set_config(proxy=proxy)
+
         for tic in self.ticker_list:
             temp_df = yf.download(
                 tic,
                 start=self.start_date,
                 end=self.end_date,
-                proxy=proxy,
                 auto_adjust=auto_adjust,
             )
             if temp_df.columns.nlevels != 1:

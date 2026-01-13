@@ -29,9 +29,8 @@ from selenium.webdriver.common.by import By
 from stockstats import StockDataFrame as Sdf
 from webdriver_manager.chrome import ChromeDriverManager
 
-### Added by aymeric75 for scrap_data function
 
-
+# Added by aymeric75 for scrap_data function
 class YahooFinanceProcessor:
     """Provides methods for retrieving daily stock data from
     Yahoo Finance API
@@ -238,6 +237,9 @@ class YahooFinanceProcessor:
         end_date = pd.Timestamp(end_date)
         delta = timedelta(days=1)
         data_df = pd.DataFrame()
+        if hasattr(yf, "set_config"):
+            yf.set_config(proxy=proxy)
+
         for tic in ticker_list:
             current_tic_start_date = start_date
             while (
@@ -248,7 +250,6 @@ class YahooFinanceProcessor:
                     start=current_tic_start_date,
                     end=current_tic_start_date + delta,
                     interval=self.time_interval,
-                    proxy=proxy,
                 )
                 if temp_df.columns.nlevels != 1:
                     temp_df.columns = temp_df.columns.droplevel(1)

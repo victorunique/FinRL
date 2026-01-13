@@ -137,7 +137,7 @@ class DRLAgent:
         model,
         tb_log_name,
         total_timesteps=5000,
-        callbacks: Type[BaseCallback] = None,
+        callbacks: list[BaseCallback] = None,
     ):  # this function is static method, so it can be called without creating an instance of the class
         model = model.learn(
             total_timesteps=total_timesteps,
@@ -169,16 +169,15 @@ class DRLAgent:
             # actions_memory = test_env.env_method(method_name="save_action_memory")
             test_obs, rewards, dones, info = test_env.step(action)
 
-            if (
-                i == max_steps - 1
-            ):  # more descriptive condition for early termination to clarify the logic
+            if i == max_steps - 1:
                 account_memory = test_env.env_method(method_name="save_asset_memory")
                 actions_memory = test_env.env_method(method_name="save_action_memory")
-            # add current state to state memory
-            # state_memory=test_env.env_method(method_name="save_state_memory")
 
             if dones[0]:
                 print("hit end!")
+                if account_memory is None:
+                    account_memory = test_env.env_method(method_name="save_asset_memory")
+                    actions_memory = test_env.env_method(method_name="save_action_memory")
                 break
         return account_memory[0], actions_memory[0]
 
@@ -261,7 +260,7 @@ class DRLEnsembleAgent:
         tb_log_name,
         iter_num,
         total_timesteps=5000,
-        callbacks: Type[BaseCallback] = None,
+        callbacks: list[BaseCallback] = None,
     ):
         model = model.learn(
             total_timesteps=total_timesteps,

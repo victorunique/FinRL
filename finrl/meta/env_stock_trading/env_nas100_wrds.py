@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import os
 
-import gym
+import gymnasium as gym
 import numpy as np
 from numpy import random as rd
 
-gym.logger.set_level(
-    40
-)  # Block warning: 'WARN: Box bound precision lowered by casting to float32'
+gym.logger.min_level = 40
 
 
 class StockEnvNAS100:
@@ -110,7 +108,7 @@ class StockEnvNAS100:
         self.total_asset = self.amount + (self.stocks * price).sum()
         self.initial_total_asset = self.total_asset
         self.gamma_reward = 0.0
-        return self.get_state(price)  # state
+        return self.get_state(price), {}  # state
 
     def step(self, actions):
         actions = (actions * self.max_stock).astype(int)
@@ -156,7 +154,7 @@ class StockEnvNAS100:
             reward = self.gamma_reward
             self.episode_return = total_asset / self.initial_total_asset
 
-        return state, reward, done, dict()
+        return state, reward, False, done, dict()
 
     def get_state(self, price):
         amount = np.array(max(self.amount, 1e4) * (2**-12), dtype=np.float32)

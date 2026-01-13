@@ -407,7 +407,7 @@ class StockEnvEmpty(gym.Env):
         seed=None,
         options=None,
     ):
-        return
+        return np.array([]), {}
 
     def step(self, actions):
-        return
+        return np.array([]), 0.0, False, False, {}

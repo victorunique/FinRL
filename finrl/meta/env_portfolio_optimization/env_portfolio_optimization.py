@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import math
 
-import gym
+import gymnasium as gym
 import matplotlib
 import numpy as np
 import pandas as pd
-from gym import spaces
-from gym.utils import seeding
+from gymnasium import spaces
+from gymnasium.utils import seeding
+from stable_baselines3.common.vec_env import DummyVecEnv
+from pathlib import Path
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from stable_baselines3.common.vec_env import DummyVecEnv
-from pathlib import Path
 
 try:
     import quantstats as qs
@@ -88,7 +88,6 @@ class PortfolioOptimizationEnv(gym.Env):
         tics_in_portfolio="all",
         time_window=1,
         cwd="./",
-        new_gym_api=False,
     ):
         """Initializes environment's instance.
 
@@ -137,7 +136,6 @@ class PortfolioOptimizationEnv(gym.Env):
         self._features = features
         self._valuation_feature = valuation_feature
         self._cwd = Path(cwd)
-        self._new_gym_api = new_gym_api
 
         # results file
         self._results_file = self._cwd / "results" / "rl"
@@ -211,13 +209,12 @@ class PortfolioOptimizationEnv(gym.Env):
             through the attribute "observation_space".
 
         Returns:
-            If "new_gym_api" is set to True, the following tuple is returned:
-            (state, reward, terminal, truncated, info). If it's set to False,
-            the following tuple is returned: (state, reward, terminal, info).
+        Returns:
+            The following tuple is returned: (state, reward, terminated, truncated, info).
 
             state: Next simulation state.
             reward: Reward related to the last performed action.
-            terminal: If True, the environment is in a terminal state.
+            terminated: If True, the environment is in a terminal state.
             truncated: If True, the environment has passed it's simulation
                 time limit. Currently, it's always False.
             info: A dictionary containing informations about the last state.
@@ -278,9 +275,7 @@ class PortfolioOptimizationEnv(gym.Env):
                 savefig=self._results_file / "portfolio_summary.png",
             )
 
-            if self._new_gym_api:
-                return self._state, self._reward, self._terminal, False, self._info
-            return self._state, self._reward, self._terminal, self._info
+            return self._state, self._reward, self._terminal, False, self._info
 
         else:
             # transform action to numpy array (if it's a list)
@@ -364,9 +359,7 @@ class PortfolioOptimizationEnv(gym.Env):
             self._reward = portfolio_reward
             self._reward = self._reward * self._reward_scaling
 
-        if self._new_gym_api:
-            return self._state, self._reward, self._terminal, False, self._info
-        return self._state, self._reward, self._terminal, self._info
+        return self._state, self._reward, self._terminal, False, self._info
 
     def reset(self):
         """Resets the environment and returns it to its initial state (the
@@ -379,9 +372,8 @@ class PortfolioOptimizationEnv(gym.Env):
             state through the attribute "observation_space".
 
         Returns:
-            If "new_gym_api" is set to True, the following tuple is returned:
-            (state, info). If it's set to False, only the initial state is
-            returned.
+        Returns:
+            A tuple with the following form: (state, info).
 
             state: Initial state.
             info: Initial state info.
@@ -396,9 +388,7 @@ class PortfolioOptimizationEnv(gym.Env):
         self._portfolio_value = self._initial_amount
         self._terminal = False
 
-        if self._new_gym_api:
-            return self._state, self._info
-        return self._state
+        return self._state, self._info
 
     def _get_state_and_info_from_time_index(self, time_index):
         """Gets state and information given a time index. It also updates "data"
@@ -581,7 +571,7 @@ class PortfolioOptimizationEnv(gym.Env):
             If a custom function is used in the normalization, it must have an
             argument representing the environment's dataframe.
         """
-        if type(normalize) == str:
+        if isinstance(normalize, str):
             if normalize == "by_fist_time_window_value":
                 print(
                     "Normalizing {} by first time window value...".format(
