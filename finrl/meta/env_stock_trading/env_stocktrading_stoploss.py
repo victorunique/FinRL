@@ -116,11 +116,31 @@ class StockTradingEnvStopLoss(gym.Env):
         self.cached_data = None
         self.cash_penalty_proportion = cash_penalty_proportion
         if self.cache_indicator_data:
-            print("caching data")
-            self.cached_data = [
-                self.get_date_vector(i) for i, _ in enumerate(self.dates)
-            ]
-            print("data cached!")
+            print("caching data...")
+            # Optimization: Vectorized caching using Pivot
+            # 1. Reset index to get date as a column for pivoting
+            temp_df = self.df.reset_index()
+            
+            # 2. Pivot table to reshape data: Index='date', Columns='tic', Values=daily_information_cols
+            # Resulting columns will be MultiIndex (Feature, Tic)
+            pivot_df = temp_df.pivot(index='date', columns='tic', values=self.daily_information_cols)
+            
+            # 3. We typically get columns as (Feature, Tic), but we need (Tic, Feature) to match 
+            # the flattening order: Asset1_Feat1, Asset1_Feat2, ... Asset2_Feat1 ...
+            pivot_df.columns = pivot_df.columns.swaplevel(0, 1)
+            
+            # 4. Create expected column order to ensure alignment matches self.assets iteration order
+            expected_cols = pd.MultiIndex.from_product(
+                [self.assets, self.daily_information_cols], 
+                names=['tic', 'feature']
+            )
+            # Reindex to enforce correct order (Tic changes, then features change)
+            pivot_df = pivot_df.reindex(columns=expected_cols)
+            
+            # 5. Convert to list of lists (much faster than iterative .loc)
+            self.cached_data = pivot_df.values.tolist()
+            
+            print(f"data cached! Shape: {pivot_df.shape}")
         self.final_asset_memory = None
         self.final_action_memory = None
 
@@ -139,7 +159,7 @@ class StockTradingEnvStopLoss(gym.Env):
         seed=None,
         options=None,
     ):
-        self.seed()
+        # self.seed() # CRITICAL FIX: Do not re-seed with time.time() on every reset!
         self.sum_trades = 0
         self.actual_num_trades = 0
         self.closing_diff_avg_buy = np.zeros(len(self.assets))
@@ -225,6 +245,7 @@ class StockTradingEnvStopLoss(gym.Env):
         return state, reward, True, False, {}
 
     def log_step(self, reason, terminal_reward=None):
+        should_force_print = terminal_reward is not None
         if terminal_reward is None:
             terminal_reward = self.account_information["reward"][-1]
         cash_pct = (
@@ -243,7 +264,8 @@ class StockTradingEnvStopLoss(gym.Env):
             f"{cash_pct * 100:0.2f}%",
         ]
         self.episode_history.append(rec)
-        print(self.template.format(*rec))
+        if (self.current_step + 1) % self.print_verbosity == 0 or should_force_print:
+            print(self.template.format(*rec))
 
     def log_header(self):
         self.template = "{0:4}|{1:4}|{2:15}|{3:15}|{4:15}|{5:10}|{6:10}|{7:10}"  # column widths: 8, 10, 15, 7, 10
@@ -387,6 +409,7 @@ class StockTradingEnvStopLoss(gym.Env):
                     costs = 0
                 else:
                     # ... end the cycle and penalize
+                    self.transaction_memory.append(actions)
                     return self.return_terminal(
                         reason="CASH SHORTAGE", reward=self.get_reward()
                     )

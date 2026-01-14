@@ -179,6 +179,12 @@ class FeatureEngineer:
         :return: (df) pandas dataframe
         """
         df = data.copy()
+        
+        # Drop duplicates first to ensure clean data processing
+        if df.duplicated(subset=["date", "tic"]).any():
+            print(f"Detected {df.duplicated(subset=['date', 'tic']).sum()} duplicate rows. Dropping them...")
+            df = df.drop_duplicates(subset=["date", "tic"])
+            
         df = df.sort_values(["date", "tic"], ignore_index=True)
         df.index = df.date.factorize()[0]
         merged_closes = df.pivot_table(index="date", columns="tic", values="close")
@@ -257,14 +263,42 @@ class FeatureEngineer:
         :return: (df) pandas dataframe
         """
         df = data.copy()
+        
+        # Ensure date column is datetime objects for reliable manipulation
+        if not pd.api.types.is_datetime64_any_dtype(df['date']):
+            df['date'] = pd.to_datetime(df['date'])
+            
+        # Get min and max dates as strings YYYY-MM-DD for YahooDownloader
+        start_date = df.date.min().strftime("%Y-%m-%d")
+        end_date = df.date.max().strftime("%Y-%m-%d")
+        
+        # Fetch VIX data
         df_vix = YahooDownloader(
-            start_date=df.date.min(), end_date=df.date.max(), ticker_list=["^VIX"]
+            start_date=start_date, end_date=end_date, ticker_list=["^VIX"]
         ).fetch_data()
+        
         vix = df_vix[["date", "close"]]
         vix.columns = ["date", "vix"]
+        # Ensure VIX date is datetime for merging
+        vix['date'] = pd.to_datetime(vix['date'])
 
-        df = df.merge(vix, on="date")
+        # Create a temporary column for merging: just the date part of the timestamp
+        # Ensure we just have the date part and no timezone issues for merging
+        df['_merge_date'] = df['date'].dt.normalize().dt.tz_localize(None)
+        vix['_merge_date'] = vix['date'].dt.normalize().dt.tz_localize(None)
+
+        # Merge on the date-only column
+        df = df.merge(vix[['_merge_date', 'vix']], on="_merge_date", how="left")
+        
+        # Drop the temporary merge column
+        df = df.drop(columns=['_merge_date'])
+        
+        # Sort and reset index
         df = df.sort_values(["date", "tic"]).reset_index(drop=True)
+        
+        # Forward fill VIX data for missing days/minutes if necessary
+        df['vix'] = df['vix'].ffill().bfill()
+        
         return df
 
     def add_turbulence(self, data):
@@ -279,7 +313,7 @@ class FeatureEngineer:
         df = df.sort_values(["date", "tic"]).reset_index(drop=True)
         return df
 
-    def calculate_turbulence(self, data):
+    def calculate_turbulence(self, data, time_period=252):
         """calculate turbulence index based on dow 30"""
         # can add other market assets
         df = data.copy()
@@ -288,43 +322,98 @@ class FeatureEngineer:
         df_price_pivot = df_price_pivot.pct_change()
 
         unique_date = df.date.unique()
-        # start after a year
-        start = 252
+        # start after a year (or time_period)
+        start = time_period
         turbulence_index = [0] * start
         # turbulence_index = [0]
         count = 0
+        
+        # Optimize: Use rolling operations instead of slicing in a loop
+        # We need the window of size `time_period` ENDING at i-1 (strictly past)
+        # So we shift returns by 1, then take rolling window
+        
+        # Calculate mean and covariance on the shifted data (historical only)
+        # We need rolling mean and covariance of the PAST `time_period` days.
+        # Shift(1) means the value at index `i` is the return at `i-1`.
+        # Then rolling(window) at index `i` includes `i-window+1` to `i`.
+        # Effectively returns[i-window:i] which is what we want.
+        
+        # NOTE: rolling.cov() returns a MultiIndex DataFrame (date, tic) -> cov
+        
+        historical_returns = df_price_pivot
+        
+        # We loop to compute Mahalanobis distance
+        # For significantly faster execution, we need to avoid re-calculating cov in tight loop if possible
+        # or at least avoid dataframe slicing.
+        
+        # Because dropna(axis=1) in the original code is dynamic (drops columns with *any* NaN in the window),
+        # standard rolling functions are slightly different (they handle pair-wise NaNs).
+        # However, for performance, we will assume reasonable data quality or standard pairwise covariance.
+        
+        # Pre-calculate rolling mean and covariance
+        # We look at strict past, so we use shift(1)
+        shifted_returns = historical_returns.shift(1)
+        
+        # rolling mean: (N, M)
+        rolling_mean = shifted_returns.rolling(window=time_period).mean()
+        
+        # rolling cov: (N*M, M) - MultiIndex
+        rolling_cov = shifted_returns.rolling(window=time_period).cov()
+        
+        # Loop is still needed to perform the matrix multiplication and inversion validly per step,
+        # but now we just lookup the pre-calculated matrices instead of slicing and reducing.
+        
         for i in range(start, len(unique_date)):
-            current_price = df_price_pivot[df_price_pivot.index == unique_date[i]]
-            # use one year rolling window to calcualte covariance
-            hist_price = df_price_pivot[
-                (df_price_pivot.index < unique_date[i])
-                & (df_price_pivot.index >= unique_date[i - 252])
-            ]
-            # Drop tickers which has number missing values more than the "oldest" ticker
-            filtered_hist_price = hist_price.iloc[
-                hist_price.isna().sum().min() :
-            ].dropna(axis=1)
-
-            cov_temp = filtered_hist_price.cov()
-            current_temp = current_price[[x for x in filtered_hist_price]] - np.mean(
-                filtered_hist_price, axis=0
-            )
-            # cov_temp = hist_price.cov()
-            # current_temp=(current_price - np.mean(hist_price,axis=0))
-
-            temp = current_temp.values.dot(np.linalg.pinv(cov_temp)).dot(
-                current_temp.values.T
-            )
-            if temp > 0:
-                count += 1
-                if count > 2:
-                    turbulence_temp = temp[0][0]
+            current_date = unique_date[i]
+            
+            # Current returns: (1, M)
+            current_row = df_price_pivot.loc[current_date]
+            
+            # Historical Mean estimate used for centering: (M,)
+            # Corresponds to index i in rolling_mean because we shifted the input
+            mu = rolling_mean.loc[current_date]
+            
+            # Covariance matrix: (M, M)
+            # rolling_cov index is (date, tic), we select by date
+            cov_mat = rolling_cov.loc[current_date]
+            
+            # Robustness: Filter out assets that have NaNs in this window (mimic original dropna)
+            # In the rolling result, if an asset has insufficient data, its mean/cov might be NaN.
+            valid_tics = cov_mat.dropna(axis=0, how='all').dropna(axis=1, how='all').index
+            # Further intersection with current valid data
+            valid_tics = valid_tics.intersection(current_row.dropna().index)
+            # Ensure mu is also valid
+            valid_tics = valid_tics.intersection(mu.dropna().index)
+            
+            if len(valid_tics) == 0:
+                turbulence_index.append(0)
+                continue
+                
+            # Filter matrices
+            current_temp = current_row[valid_tics] - mu[valid_tics]
+            cov_temp = cov_mat.loc[valid_tics, valid_tics]
+            
+            # Inverse covariance
+            try:
+                # Pseudo-inverse
+                inv_cov_temp = np.linalg.pinv(cov_temp.values)
+                
+                # Mahalanobis distance: (x-u) * S^-1 * (x-u)^T
+                temp = current_temp.values.dot(inv_cov_temp).dot(current_temp.values.T)
+                
+                if temp > 0:
+                    count += 1
+                    if count > 2:
+                        turbulence_temp = temp
+                    else:
+                        turbulence_temp = 0
                 else:
-                    # avoid large outlier because of the calculation just begins
                     turbulence_temp = 0
-            else:
+            except Exception:
                 turbulence_temp = 0
+                
             turbulence_index.append(turbulence_temp)
+
         try:
             turbulence_index = pd.DataFrame(
                 {"date": df_price_pivot.index, "turbulence": turbulence_index}
