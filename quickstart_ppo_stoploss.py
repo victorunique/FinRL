@@ -58,6 +58,10 @@ def main():
                         help="Stop loss threshold (Default: 0.9 = 10% loss). Lower to 0.85 for 15% tolerance.")
     parser.add_argument("--cash_penalty", type=float, default=0.1, 
                         help="Penalty portion for holding cash (Default: 0.1). Set to 0.0 to allow 100% investment.")
+    parser.add_argument("--hmax", type=float, default=1000, 
+                        help="Max cash to trade per asset per step (Default: 1000).")
+    parser.add_argument("--continuous_actions", dest="discrete_actions", action='store_false', 
+                        help="Use continuous actions instead of discrete (Default: Discrete is ON).")
     
     # -----------------------------------------------------------------------------------
     # Training Hyperparameters
@@ -154,12 +158,12 @@ def main():
 
     # Define Environment Key Arguments using ARGPARSE variables
     env_kwargs = {
-        "hmax": 100,                             
+        "hmax": args.hmax,                             
         "initial_amount": 1000000,               
         "buy_cost_pct": 0.001,                   
         "sell_cost_pct": 0.001,                  
         "print_verbosity": 1000,                    
-        "discrete_actions": False,
+        "discrete_actions": args.discrete_actions,
         "daily_information_cols": ["open", "close", "high", "low", "volume"] + INDICATORS + [col for col in ["vix", "turbulence"] if col in processed_df.columns],
         
         # --- Tuned Parameters from Args ---

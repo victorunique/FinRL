@@ -353,6 +353,7 @@ class StockTradingEnvStopLoss(gym.Env):
             self.actions_memory.append(
                 actions * closings
             )  # capture what the model's trying to do
+            
             # buy/sell only if the price is > 0 (no missing data in this particular date)
             actions = np.where(closings > 0, actions, 0)
             if self.turbulence_threshold is not None:
@@ -360,7 +361,8 @@ class StockTradingEnvStopLoss(gym.Env):
                 if self.turbulence >= self.turbulence_threshold:
                     actions = -(np.array(holdings) * closings)
                     self.log_step(reason="TURBULENCE")
-            # scale cash purchases to asset
+            
+            # scale cash purchases to assets (actions transformed from values to shares)
             if self.discrete_actions:
                 # convert into integer because we can't buy fraction of shares
                 actions = np.where(closings > 0, actions // closings, 0)
@@ -373,6 +375,10 @@ class StockTradingEnvStopLoss(gym.Env):
                     * self.shares_increment,
                 )
             else:
+                # The model outputs the *value* (cash) to trade, not the number of shares.
+                # We convert this value to number of shares by dividing by the closing price.
+                # This normalizes the action space ensuring the model trades equal *value* across different priced stocks.
+                # Handles division by zero safely.
                 actions = np.where(closings > 0, actions / closings, 0)
 
             # clip actions so we can't sell more assets than we hold
