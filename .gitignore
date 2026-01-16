@@ -1,5 +1,8 @@
 # Custom config
-#results/
+results/
+preprocessed_data/
+trained_models/
+.agent/
 
 # remove DS_Store
 **/.DS_Store

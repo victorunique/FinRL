@@ -170,7 +170,6 @@ def main():
         "stoploss_penalty": args.stoploss_penalty,
         "profit_loss_ratio": args.profit_loss_ratio,
         "cash_penalty_proportion": args.cash_penalty,
-        
         "turbulence_threshold": None             
     }
 
@@ -255,6 +254,12 @@ def main():
     
         env_kwargs['turbulence_threshold'] = None
     
+    # For training, we want random_start=True (the default). This forces the agent to start at 
+    # random points in the dataset, helping it generalize better and avoid overfitting to a specific 
+    # sequence of dates.
+    # For backtesting, we strictly want random_start=False so that we test the exact timeline from 
+    # beginning to end.
+    env_kwargs['random_start'] = False
     e_trade_gym = DummyVecEnv([lambda: StockTradingEnvStopLoss(df=trade_df, **env_kwargs)])
     
     # Load the normalization statistics

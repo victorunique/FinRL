@@ -60,17 +60,29 @@ class CNN1DFeaturesExtractor(BaseFeaturesExtractor):
             reshaped = sample_input.view(1, self.n_stack, self.n_features).permute(0, 2, 1)  # (B, F, T)
             n_flatten = self.cnn(reshaped).shape[1]
 
-        # If the output of CNN doesn't match features_dim, we could add a linear layer
-        # But the design says "terminated by Global Average Pooling... fixed-length feature representation"
-        # Since the last conv has 128 channels and we do AdaptiveAvgPool1d(1), the output is 128.
-        # So it should match features_dim=128.
-        self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
+        # The output of the CNN is dynamically calculated (should be 128)
+        cnn_output_dim = n_flatten
         
+        # If the requested features_dim is different from the CNN output, 
+        # or if we want to ensure a projection layer is always present (as per the bug fix plan),
+        # we add the linear layer. 
+        # To strictly follow the "fixed-length feature representation" of 128 from the paper 
+        # but allow flexibility, we project if features_dim != 128.
+        # However, the previous code ALWAYS defined it but didn't use it.
+        # Let's make it used.
+        self.linear = nn.Sequential(nn.Linear(cnn_output_dim, features_dim), nn.ReLU())
+
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         # observations shape: (Batch, n_stack * n_features)
         # Reshape to (Batch, n_stack, n_features)
         x = observations.view(-1, self.n_stack, self.n_features)
         # Permute to (Batch, n_features, n_stack) for Conv1d
         x = x.permute(0, 2, 1)
+        
+        # Apply CNN backbone
+        x = self.cnn(x)
+        
+        # Apply linear projection
+        x = self.linear(x)
 
-        return self.cnn(x)
+        return x
