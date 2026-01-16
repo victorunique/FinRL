@@ -19,7 +19,7 @@ from finrl.agents.stablebaselines3.models import DRLAgent
 from finrl import config_tickers
 from finrl.config import INDICATORS
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
+from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecNormalize
 from finrl.agents.stablebaselines3.custom_models import CNN1DFeaturesExtractor
 
 # =======================================================================================
@@ -182,7 +182,12 @@ def main():
     train_df = data_split(processed_df, TRAIN_START_DATE, TRAIN_END_DATE)
 
     e_train_gym = DummyVecEnv([lambda: StockTradingEnvStopLoss(df=train_df, **env_kwargs)])
-    e_train_stacked = VecFrameStack(e_train_gym, n_stack=WINDOW_SIZE)
+    
+    # Normalize observations and rewards
+    # We clip observations to 10.0 to avoid outliers
+    e_train_normalized = VecNormalize(e_train_gym, norm_obs=True, norm_reward=True, clip_obs=10.)
+    
+    e_train_stacked = VecFrameStack(e_train_normalized, n_stack=WINDOW_SIZE)
 
     agent = DRLAgent(env=e_train_stacked)
 
@@ -229,6 +234,10 @@ def main():
         )
         print("Training finished!")
         trained_ppo.save(MODEL_PATH)
+        
+        # Save the normalization statistics
+        print(f"Saving normalization statistics to {MODEL_PATH}_vecnormalize.pkl...")
+        e_train_normalized.save(f"{MODEL_PATH}_vecnormalize.pkl")
 
     # =======================================================================================
     # 5. Backtesting / Prediction
@@ -244,8 +253,27 @@ def main():
         print("Turbulence column not found, skipping turbulence threshold.")
         env_kwargs['turbulence_threshold'] = None
     
+        env_kwargs['turbulence_threshold'] = None
+    
     e_trade_gym = DummyVecEnv([lambda: StockTradingEnvStopLoss(df=trade_df, **env_kwargs)])
-    e_trade_stacked = VecFrameStack(e_trade_gym, n_stack=WINDOW_SIZE)
+    
+    # Load the normalization statistics
+    # IMPORTANT: We must use the same statistics as during training for the test set
+    VEC_NORMALIZE_PATH = os.path.join(TRAINED_MODEL_DIR, f"{args.model_name}_vecnormalize.pkl")
+    if os.path.exists(VEC_NORMALIZE_PATH):
+        print(f"Loading normalization statistics from {VEC_NORMALIZE_PATH}...")
+        e_trade_normalized = VecNormalize.load(VEC_NORMALIZE_PATH, e_trade_gym)
+        # We don't want to update the running average when testing
+        e_trade_normalized.training = False
+        # We also don't usually reward normalize at test time (though PPO predict doesn't use it, 
+        # it affects the returned reward if we were to look at it)
+        e_trade_normalized.norm_reward = False
+    else:
+        print("Warning: No normalization statistics found. Running without normalization (results may be poor).")
+        e_trade_normalized = VecNormalize(e_trade_gym, norm_obs=True, norm_reward=False, clip_obs=10.)
+        e_trade_normalized.training = False
+
+    e_trade_stacked = VecFrameStack(e_trade_normalized, n_stack=WINDOW_SIZE)
 
     print("Running backtest on trade/validation data...")
 
