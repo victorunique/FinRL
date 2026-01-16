@@ -55,13 +55,15 @@ def main():
     parser.add_argument("--profit_loss_ratio", type=float, default=2.0, 
                         help="Target profit relative to stop loss risk (Default: 2.0). Lower this to 1.0 or 1.5 for more aggressive profit taking.")
     parser.add_argument("--stoploss_penalty", type=float, default=0.9, 
-                        help="Stop loss threshold (Default: 0.9 = 10% loss). Lower to 0.85 for 15% tolerance.")
+                        help="Stop loss threshold (Default: 0.9 = 10%% loss). Lower to 0.85 for 15%% tolerance.")
     parser.add_argument("--cash_penalty", type=float, default=0.1, 
-                        help="Penalty portion for holding cash (Default: 0.1). Set to 0.0 to allow 100% investment.")
+                        help="Penalty portion for holding cash (Default: 0.1). Set to 0.0 to allow 100%% investment.")
     parser.add_argument("--hmax", type=float, default=1000, 
                         help="Max cash to trade per asset per step (Default: 1000).")
     parser.add_argument("--continuous_actions", dest="discrete_actions", action='store_false', 
                         help="Use continuous actions instead of discrete (Default: Discrete is ON).")
+    parser.add_argument("--patient", action='store_true', default=True,
+                        help="If True, the agent won't terminate on cash shortage, just won't trade. (Default: True)")
     
     # -----------------------------------------------------------------------------------
     # Training Hyperparameters
@@ -170,7 +172,8 @@ def main():
         "stoploss_penalty": args.stoploss_penalty,
         "profit_loss_ratio": args.profit_loss_ratio,
         "cash_penalty_proportion": args.cash_penalty,
-        "turbulence_threshold": None             
+        "turbulence_threshold": None,
+        "patient": args.patient             
     }
 
     print(f"Environment Config: profit_loss_ratio={args.profit_loss_ratio}, stoploss_penalty={args.stoploss_penalty}, cash_penalty={args.cash_penalty}")
