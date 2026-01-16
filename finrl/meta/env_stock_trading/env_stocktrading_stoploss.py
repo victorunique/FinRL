@@ -247,7 +247,10 @@ class StockTradingEnvStopLoss(gym.Env):
     def log_step(self, reason, terminal_reward=None):
         should_force_print = terminal_reward is not None
         if terminal_reward is None:
-            terminal_reward = self.account_information["reward"][-1]
+            if len(self.account_information["reward"]) > 0:
+                terminal_reward = self.account_information["reward"][-1]
+            else:
+                terminal_reward = 0
         cash_pct = (
             self.account_information["cash"][-1]
             / self.account_information["total_assets"][-1]
@@ -505,7 +508,7 @@ class StockTradingEnvStopLoss(gym.Env):
             return None
         else:
             self.account_information["date"] = self.dates[
-                -len(self.account_information["cash"]) :
+                self.starting_point : self.starting_point + len(self.account_information["cash"])
             ]
             return pd.DataFrame(self.account_information)
 
@@ -517,7 +520,7 @@ class StockTradingEnvStopLoss(gym.Env):
         else:
             return pd.DataFrame(
                 {
-                    "date": self.dates[-len(self.account_information["cash"]) :],
+                    "date": self.dates[self.starting_point : self.starting_point + len(self.account_information["cash"])],
                     "actions": self.actions_memory,
                     "transactions": self.transaction_memory,
                 }
