@@ -12,7 +12,7 @@ from finrl.meta.preprocessor.yahoodownloader import YahooDownloader
 # FeatureEngineer performs preprocessing and technical indicator calculation
 from finrl.meta.preprocessor.preprocessors import FeatureEngineer, data_split
 # The specific environment with stop-loss mechanism we want to use
-from finrl.meta.env_stock_trading.env_stocktrading_stoploss import StockTradingEnvStopLoss
+from finrl.meta.env_stock_trading.env_stocktrading_minute import StockTradingEnvMinute
 # DRLAgent wrapper for Stable Baselines 3 algorithms
 from finrl.agents.stablebaselines3.models import DRLAgent
 # Configuration files for default tickers and indicators
@@ -47,38 +47,46 @@ def check_dates():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train PPO agent with StopLoss environment")
+    parser = argparse.ArgumentParser(description="Train PPO agent with Minute-Level Trading environment")
     
     # -----------------------------------------------------------------------------------
     # Risk/Reward Parameters (TUNABLE)
     # -----------------------------------------------------------------------------------
-    parser.add_argument("--profit_loss_ratio", type=float, default=2.0, 
-                        help="Target profit relative to stop loss risk (Default: 2.0). Lower this to 1.0 or 1.5 for more aggressive profit taking.")
+    parser.add_argument("--profit_loss_ratio", type=float, default=1.5, 
+                        help="Target profit relative to stop loss risk (Default: 1.5).")
     parser.add_argument("--stoploss_penalty", type=float, default=0.9, 
-                        help="Stop loss threshold (Default: 0.9 = 10%% loss). Lower to 0.85 for 15%% tolerance.")
-    parser.add_argument("--cash_penalty", type=float, default=0.1, 
-                        help="Penalty portion for holding cash (Default: 0.1). Set to 0.0 to allow 100%% investment.")
-    parser.add_argument("--hmax", type=float, default=1000, 
-                        help="Max cash to trade per asset per step (Default: 1000).")
+                        help="Stop loss threshold (Default: 0.9 = 10%% loss).")
+    parser.add_argument("--cash_penalty", type=float, default=0.05, 
+                        help="Penalty portion for holding cash (Default: 0.05).")
+    parser.add_argument("--hmax", type=float, default=100000, 
+                        help="Max cash to trade per asset per step (Default: 100000 - roughly 10%% of 1M portfolio).")
+    parser.add_argument("--buy_cost_pct", type=float, default=0.0001,
+                        help="Trading cost pct for buying (Default: 0.0001).")
+    parser.add_argument("--sell_cost_pct", type=float, default=0.0001,
+                        help="Trading cost pct for selling (Default: 0.0001).")
     parser.add_argument("--continuous_actions", dest="discrete_actions", action='store_false', 
                         help="Use continuous actions instead of discrete (Default: Discrete is ON).")
     parser.add_argument("--patient", action='store_true', default=True,
                         help="If True, the agent won't terminate on cash shortage, just won't trade. (Default: True)")
+    parser.add_argument("--episode_length", type=int, default=1000,
+                        help="Length of each training episode (rolling window). Set to -1 for full data. (Default: 1000)")
     
     # -----------------------------------------------------------------------------------
     # Training Hyperparameters
     # -----------------------------------------------------------------------------------
-    parser.add_argument("--ent_coef", type=float, default=0.01, 
-                        help="Entropy coefficient (Default: 0.01). Increase to 0.02-0.03 for more exploration.")
+    parser.add_argument("--ent_coef", type=float, default=0.02, 
+                        help="Entropy coefficient (Default: 0.02). Increased for exploration.")
     parser.add_argument("--learning_rate", type=float, default=0.00025, 
                         help="Learning rate for PPO (Default: 0.00025)")
     parser.add_argument("--total_timesteps", type=int, default=200000, 
                         help="Total training timesteps (Default: 200000)")
+    parser.add_argument("--gamma", type=float, default=0.95,
+                        help="Discount factor (Default: 0.95). Reduced for short-term focus.")
     
     # -----------------------------------------------------------------------------------
     # Model Naming & Misc
     # -----------------------------------------------------------------------------------
-    parser.add_argument("--model_name", type=str, default="ppo_stoploss_agent", 
+    parser.add_argument("--model_name", type=str, default="ppo_minute_agent", 
                         help="Name of the model file to save (without extension)")
     
     # -----------------------------------------------------------------------------------
@@ -162,19 +170,32 @@ def main():
     env_kwargs = {
         "hmax": args.hmax,                             
         "initial_amount": 1000000,               
-        "buy_cost_pct": 0.001,                   
-        "sell_cost_pct": 0.001,                  
+        "buy_cost_pct": args.buy_cost_pct,                   
+        "sell_cost_pct": args.sell_cost_pct,                  
         "print_verbosity": 1000,                    
         "discrete_actions": args.discrete_actions,
-        "daily_information_cols": ["open", "close", "high", "low", "volume"] + INDICATORS + [col for col in ["vix", "turbulence"] if col in processed_df.columns],
+        "daily_information_cols": ["open", "close", "high", "low", "volume"] + INDICATORS + [col for col in ["vix"] if col in processed_df.columns],
         
         # --- Tuned Parameters from Args ---
         "stoploss_penalty": args.stoploss_penalty,
         "profit_loss_ratio": args.profit_loss_ratio,
         "cash_penalty_proportion": args.cash_penalty,
-        "turbulence_threshold": None,
+
         "patient": args.patient             
     }
+    
+    # Separate kwargs for Training and Testing
+    env_train_kwargs = env_kwargs.copy()
+    env_train_kwargs.update({
+        "episode_length": args.episode_length,
+        "random_start": True
+    })
+
+    env_test_kwargs = env_kwargs.copy()
+    env_test_kwargs.update({
+        "episode_length": -1,  # Run through full data
+        "random_start": False  # Start from beginning
+    })
 
     print(f"Environment Config: profit_loss_ratio={args.profit_loss_ratio}, stoploss_penalty={args.stoploss_penalty}, cash_penalty={args.cash_penalty}")
 
@@ -183,7 +204,8 @@ def main():
     # =======================================================================================
     train_df = data_split(processed_df, TRAIN_START_DATE, TRAIN_END_DATE)
 
-    e_train_gym = DummyVecEnv([lambda: StockTradingEnvStopLoss(df=train_df, **env_kwargs)])
+    # Use the new Minute-based Environment
+    e_train_gym = DummyVecEnv([lambda: StockTradingEnvMinute(df=train_df, **env_train_kwargs)])
     
     # Normalize observations and rewards
     # We clip observations to 10.0 to avoid outliers
@@ -206,6 +228,7 @@ def main():
         "ent_coef": args.ent_coef,  # Tuned Parameter
         "learning_rate": args.learning_rate,
         "batch_size": 128,
+        "gamma": args.gamma,        # Focus on shorter term rewards
         "device": device,
     }
 
@@ -245,25 +268,10 @@ def main():
     # 5. Backtesting / Prediction
     # =======================================================================================
     trade_df = data_split(processed_df, TRADE_START_DATE, TRADE_END_DATE)
-
-    if "turbulence" in train_df.columns:
-        insample_turbulence = train_df['turbulence'].values
-        turbulence_threshold = np.quantile(insample_turbulence, 0.99)
-        print(f"Setting turbulence threshold to: {turbulence_threshold}")
-        env_kwargs['turbulence_threshold'] = turbulence_threshold
-    else:
-        print("Turbulence column not found, skipping turbulence threshold.")
-        env_kwargs['turbulence_threshold'] = None
     
-        env_kwargs['turbulence_threshold'] = None
-    
-    # For training, we want random_start=True (the default). This forces the agent to start at 
-    # random points in the dataset, helping it generalize better and avoid overfitting to a specific 
-    # sequence of dates.
     # For backtesting, we strictly want random_start=False so that we test the exact timeline from 
     # beginning to end.
-    env_kwargs['random_start'] = False
-    e_trade_gym = DummyVecEnv([lambda: StockTradingEnvStopLoss(df=trade_df, **env_kwargs)])
+    e_trade_gym = DummyVecEnv([lambda: StockTradingEnvMinute(df=trade_df, **env_test_kwargs)])
     
     # Load the normalization statistics
     # IMPORTANT: We must use the same statistics as during training for the test set
