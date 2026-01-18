@@ -19,14 +19,29 @@ TRADE_END_DATE = "2021-12-01"
 # stockstats technical indicator column names
 # check https://pypi.org/project/stockstats/ for different names
 INDICATORS = [
-    "macd",
-    "boll_ub",
-    "boll_lb",
-    "rsi_30",
-    "cci_30",
-    "dx_30",
-    "close_30_sma",
-    "close_60_sma",
+    "atr",  # Average True Range (Default 14 periods)
+    "atr_20",  # Average True Range (20 periods)
+    "macd",  # Moving Average Convergence Divergence
+    "macds",  # MACD Signal Line
+    "macdh",  # MACD Histogram
+    "boll_ub",  # Bollinger Bands Upper Band
+    "boll_lb",  # Bollinger Bands Lower Band
+    "boll",  # Bollinger Bands Middle Band (Main)
+    "rsi_14",  # Relative Strength Index (Default 14 periods)
+    "rsi_6",  # Relative Strength Index (6 periods)
+    "adx",  # Average Directional Index (Default 14 periods)
+    "dx",  # Directional Movement Index
+    "close_12_ema",  # Exponential Moving Average (12 periods)
+    "close_26_ema",  # Exponential Moving Average (26 periods)
+    "close_50_ema",  # Exponential Moving Average (50 periods)
+    "close_30_sma",  # Simple Moving Average (30 periods)
+    "close_60_sma",  # Simple Moving Average (60 periods)
+    "kdjk",  # Stochastic Oscillator K value
+    "kdjd",  # Stochastic Oscillator D value
+    "kdjj",  # Stochastic Oscillator J value
+    "cci",  # Commodity Channel Index (Default 14 periods)
+    "cci_20",  # Commodity Channel Index (20 periods)
+    "tr",  # True Range
 ]
 
 

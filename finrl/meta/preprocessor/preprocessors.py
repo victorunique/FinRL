@@ -212,32 +212,36 @@ class FeatureEngineer:
         """
         df = data.copy()
         df = df.sort_values(by=["tic", "date"])
+        
         stock = Sdf.retype(df.copy())
         unique_ticker = stock.tic.unique()
 
-        for indicator in self.tech_indicator_list:
-            indicator_df = pd.DataFrame()
-            for i in range(len(unique_ticker)):
-                try:
-                    temp_indicator = stock[stock.tic == unique_ticker[i]][indicator]
-                    temp_indicator = pd.DataFrame(temp_indicator)
-                    temp_indicator["tic"] = unique_ticker[i]
-                    temp_indicator["date"] = df[df.tic == unique_ticker[i]][
-                        "date"
-                    ].to_list()
-                    # indicator_df = indicator_df.append(
-                    #     temp_indicator, ignore_index=True
-                    # )
-                    indicator_df = pd.concat(
-                        [indicator_df, temp_indicator], axis=0, ignore_index=True
-                    )
-                except Exception as e:
-                    print(e)
-            df = df.merge(
-                indicator_df[["tic", "date", indicator]], on=["tic", "date"], how="left"
-            )
-        df = df.sort_values(by=["date", "tic"])
-        return df
+        final_df = pd.DataFrame()
+        
+        for ticker in unique_ticker:
+            # Filter data for current ticker
+            ticker_df = df[df.tic == ticker].copy()
+            # Convert to StockDataFrame
+            stock = Sdf.retype(ticker_df)
+            
+            # Calculate all indicators
+            for indicator in self.tech_indicator_list:
+                # Accessing the column calculates it and adds it to 'stock'
+                _ = stock[indicator]
+            
+            # Append to final result
+            final_df = pd.concat([final_df, stock], ignore_index=True, axis=0) 
+            
+        final_df = final_df.sort_values(by=["date", "tic"])
+        
+        # Restore original column order and add indicators, removing intermediate columns (like macds, boll, etc.)
+        columns_to_keep = list(df.columns) + self.tech_indicator_list
+        # Remove duplicates while preserving order
+        columns_to_keep = list(dict.fromkeys(columns_to_keep))
+        # Ensure only existing columns are selected
+        columns_to_keep = [col for col in columns_to_keep if col in final_df.columns]
+        
+        return final_df[columns_to_keep]
         # df = data.set_index(['date','tic']).sort_index()
         # df = df.join(df.groupby(level=0, group_keys=False).apply(lambda x, y: Sdf.retype(x)[y], y=self.tech_indicator_list))
         # return df.reset_index()
