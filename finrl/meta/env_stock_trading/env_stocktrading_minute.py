@@ -69,10 +69,18 @@ class StockTradingEnvMinute(gym.Env):
         )
         
         # Action Space: composite of trading actions and stoploss ratios
-        self.action_space = spaces.Dict({
-            "trading_actions": spaces.Box(low=-1.0, high=1.0, shape=(len(self.assets),), dtype=np.float32),
-            "stoploss_ratios": spaces.Box(low=0.5, high=1.0, shape=(len(self.assets),), dtype=np.float32)
-        })
+        # Flattened for PPO compatibility: [Trading Actions (n) | Stoploss Ratios (n)]
+        n_assets = len(self.assets)
+        action_dim = 2 * n_assets
+        
+        # Define bounds
+        # Trading actions: [-1, 1]
+        # Stoploss ratios: [0.5, 1.0]
+        # Note: SB3 will automatically rescale actions to these bounds
+        low = np.concatenate([np.full(n_assets, -1.0), np.full(n_assets, 0.5)])
+        high = np.concatenate([np.full(n_assets, 1.0), np.full(n_assets, 1.0)])
+        
+        self.action_space = spaces.Box(low=low, high=high, shape=(action_dim,), dtype=np.float32)
         
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.state_space,)

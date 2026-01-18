@@ -228,6 +228,10 @@ class FeatureEngineer:
                 # Accessing the column calculates it and adds it to 'stock'
                 _ = stock[indicator]
             
+            # Ensure date is a column before concat, as Sdf.retype might have moved it to index
+            if "date" not in stock.columns:
+                stock = stock.reset_index()
+            
             # Append to final result
             final_df = pd.concat([final_df, stock], ignore_index=True, axis=0) 
             
