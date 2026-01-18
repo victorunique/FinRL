@@ -51,8 +51,8 @@ def calculate_sortino_ratio(series, risk_free_rate=0):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Baseline Buy & Hold Strategy")
-    parser.add_argument("--model_name", type=str, default="ppo_stoploss_agent", 
-                        help="Name of the model to compare against (default: ppo_stoploss_agent)")
+    parser.add_argument("--model_name", type=str, default="ppo_minute_agent", 
+                        help="Name of the model to compare against (default: ppo_minute_agent)")
     args = parser.parse_args()
 
     # 1. Load PPO Agent Results (to get Trade Dates)

@@ -18,8 +18,8 @@ def parse_list_string(list_str):
 
 def main():
     parser = argparse.ArgumentParser(description="Plot Trading Results")
-    parser.add_argument("--model_name", type=str, default="ppo_stoploss_agent", 
-                        help="Name of the model to plot (default: ppo_stoploss_agent)")
+    parser.add_argument("--model_name", type=str, default="ppo_minute_agent", 
+                        help="Name of the model to plot (default: ppo_minute_agent)")
     args = parser.parse_args()
 
     results_dir = "results"

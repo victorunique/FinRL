@@ -77,8 +77,8 @@ class StockTradingEnvMinute(gym.Env):
         # Trading actions: [-1, 1]
         # Stoploss ratios: [0.5, 1.0]
         # Note: SB3 will automatically rescale actions to these bounds
-        low = np.concatenate([np.full(n_assets, -1.0), np.full(n_assets, 0.5)])
-        high = np.concatenate([np.full(n_assets, 1.0), np.full(n_assets, 1.0)])
+        low = np.concatenate([np.full(n_assets, -1.0, dtype=np.float32), np.full(n_assets, 0.5, dtype=np.float32)])
+        high = np.concatenate([np.full(n_assets, 1.0, dtype=np.float32), np.full(n_assets, 1.0, dtype=np.float32)])
         
         self.action_space = spaces.Box(low=low, high=high, shape=(action_dim,), dtype=np.float32)
         
