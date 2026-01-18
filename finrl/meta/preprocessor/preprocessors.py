@@ -270,7 +270,7 @@ class FeatureEngineer:
             
         # Get min and max dates as strings YYYY-MM-DD for YahooDownloader
         start_date = df.date.min().strftime("%Y-%m-%d")
-        end_date = df.date.max().strftime("%Y-%m-%d")
+        end_date = (df.date.max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
         
         # Fetch VIX data
         df_vix = YahooDownloader(

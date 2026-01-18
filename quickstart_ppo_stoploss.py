@@ -74,14 +74,14 @@ def main():
     # -----------------------------------------------------------------------------------
     # Training Hyperparameters
     # -----------------------------------------------------------------------------------
-    parser.add_argument("--ent_coef", type=float, default=0.02, 
-                        help="Entropy coefficient (Default: 0.02). Increased for exploration.")
+    parser.add_argument("--ent_coef", type=float, default=0.01, 
+                        help="Entropy coefficient (Default: 0.01)")
     parser.add_argument("--learning_rate", type=float, default=0.00025, 
                         help="Learning rate for PPO (Default: 0.00025)")
     parser.add_argument("--total_timesteps", type=int, default=200000, 
                         help="Total training timesteps (Default: 200000)")
-    parser.add_argument("--gamma", type=float, default=0.95,
-                        help="Discount factor (Default: 0.95). Reduced for short-term focus.")
+    parser.add_argument("--gamma", type=float, default=0.99,
+                        help="Discount factor (Default: 0.99)")
     
     # -----------------------------------------------------------------------------------
     # Model Naming & Misc
@@ -172,7 +172,7 @@ def main():
         "initial_amount": 1000000,               
         "buy_cost_pct": args.buy_cost_pct,                   
         "sell_cost_pct": args.sell_cost_pct,                  
-        "print_verbosity": 1000,                    
+        "print_verbosity": 500,                    
         "discrete_actions": args.discrete_actions,
         "daily_information_cols": ["open", "close", "high", "low", "volume"] + INDICATORS + [col for col in ["vix"] if col in processed_df.columns],
         
