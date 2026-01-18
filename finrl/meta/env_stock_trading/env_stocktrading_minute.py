@@ -67,7 +67,13 @@ class StockTradingEnvMinute(gym.Env):
         self.state_space = (
             1 + len(self.assets) + len(self.assets) * len(self.daily_information_cols)
         )
-        self.action_space = spaces.Box(low=-1, high=1, shape=(len(self.assets),))
+        
+        # Action Space: composite of trading actions and stoploss ratios
+        self.action_space = spaces.Dict({
+            "trading_actions": spaces.Box(low=-1.0, high=1.0, shape=(len(self.assets),), dtype=np.float32),
+            "stoploss_ratios": spaces.Box(low=0.5, high=1.0, shape=(len(self.assets),), dtype=np.float32)
+        })
+        
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.state_space,)
         )
@@ -141,7 +147,7 @@ class StockTradingEnvMinute(gym.Env):
         # self.closing_diff_avg_buy = np.zeros(len(self.assets))
         # self.profit_sell_diff_avg_buy = np.zeros(len(self.assets))
         # self.n_buys = np.zeros(len(self.assets))
-        # self.avg_buy_price = np.zeros(len(self.assets))
+        self.avg_buy_price = np.zeros(len(self.assets))
         if self.random_start:
             # If episode_length is set, we must leave enough room for the episode to finish
             if self.episode_length > 0:
@@ -268,7 +274,7 @@ class StockTradingEnvMinute(gym.Env):
         """
         # Track previous portfolio value
         begin_cash = self.state_memory[-1][0]
-        holdings = self.state_memory[-1][1 : len(self.assets) + 1]
+        holdings = np.array(self.state_memory[-1][1 : len(self.assets) + 1])
 
         # 1. Get current valuation (State t)
         current_closings = np.array(self.get_date_vector(self.date_index, cols=["close"]))
@@ -277,6 +283,29 @@ class StockTradingEnvMinute(gym.Env):
         # -----------------------------------------------------------------------
         # EXECUTE ACTION
         # -----------------------------------------------------------------------
+        
+        # Parse Action
+        if isinstance(actions, dict):
+            trading_actions = actions["trading_actions"].astype(np.float32)
+            stoploss_ratios = actions["stoploss_ratios"].astype(np.float32)
+        else:
+            # Fallback for legacy or flat array inputs (if wrapper flattened it)
+            # Assuming strictly the new format is required, but if SB3 flattens it, we might get an array
+            # However, SB3 MultiInputPolicy passes a dict. 
+            # If standard policy is used, it might crash. User is aware.
+            if isinstance(actions, np.ndarray) and actions.shape[0] == 2 * len(self.assets):
+                trading_actions = actions[:len(self.assets)].astype(np.float32)
+                stoploss_ratios = actions[len(self.assets):].astype(np.float32)
+            else:
+                # Default fallback if somehow we got here with old agent code
+                trading_actions = actions
+                if hasattr(trading_actions, "astype"):
+                    trading_actions = trading_actions.astype(np.float32)
+                stoploss_ratios = np.ones(len(self.assets), dtype=np.float32) * self.stoploss_penalty
+
+        # Clip Stop Loss Ratios to enforced bounds (0.5 to 1.0)
+        stoploss_ratios = np.clip(stoploss_ratios, 0.5, 1.0)
+
         # self.sum_trades += np.sum(np.abs(actions))
 
         # Print header and log if needed
@@ -288,88 +317,123 @@ class StockTradingEnvMinute(gym.Env):
         # Check if we are at the end
         if self.date_index == len(self.dates) - 1:
             return self.return_terminal(reward=0)  # Reward doesn't verify matter at terminal step for PPO update usually
+            
+        # -----------------------------------------------------------------------
+        # STOP LOSS CHECKS (Before Executing New Trades)
+        # -----------------------------------------------------------------------
+        # Use LOW prices to check for intraday stop loss touches
+        current_lows = np.array(self.get_date_vector(self.date_index, cols=["low"]))
+        
+        # Thresholds
+        sl_thresholds = self.avg_buy_price * stoploss_ratios
+        
+        # Identify triggers: Price < Threshold AND We have holdings
+        # (Only check if we actually have holdings, otherwise avg_buy_price might be 0)
+        sl_hit_mask = (current_lows < sl_thresholds) & (holdings > 0)
+        
+        if np.any(sl_hit_mask):
+            self.log_step(reason="STOP LOSS TRIGGERED")
 
         # Scale actions
-        actions = actions * self.hmax
-        self.actions_memory.append(actions)
+        trading_actions = trading_actions * self.hmax
+        self.actions_memory.append(trading_actions)
 
         # Handle missing data (price=0)
         # actions = np.where(current_closings > 0, actions, 0)
 
         # Normalize actions (Cash Value -> Shares)
         if self.discrete_actions:
-            actions = np.where(current_closings > 0, actions // current_closings, 0)
-            actions = actions.astype(int)
-            actions = np.where(
-                actions >= 0,
-                (actions // self.shares_increment) * self.shares_increment,
-                ((actions + self.shares_increment) // self.shares_increment)
+            trading_actions = np.where(current_closings > 0, trading_actions // current_closings, 0)
+            trading_actions = trading_actions.astype(int)
+            trading_actions = np.where(
+                trading_actions >= 0,
+                (trading_actions // self.shares_increment) * self.shares_increment,
+                ((trading_actions + self.shares_increment) // self.shares_increment)
                 * self.shares_increment,
             )
         else:
-            actions = np.where(current_closings > 0, actions / current_closings, 0)
-
-        # Clip sell actions to holdings
-        actions = np.maximum(actions, -np.array(holdings))
+            trading_actions = np.where(current_closings > 0, trading_actions / current_closings, 0)
 
         # -----------------------------------------------------------------------
-        # STOP LOSS & FORCED EXIT LOGIC (Safety)
+        # MERGE STOP LOSS WITH TRADING ACTIONS
         # -----------------------------------------------------------------------
-        # self.closing_diff_avg_buy = current_closings - (
-        #     self.stoploss_penalty * self.avg_buy_price
-        # )
-        # if begin_cash >= self.stoploss_penalty * self.initial_amount:
-        #     actions = np.where(
-        #         self.closing_diff_avg_buy < 0, -np.array(holdings), actions
-        #     )
-        #     if any(np.clip(self.closing_diff_avg_buy, -np.inf, 0) < 0):
-        #         self.log_step(reason="STOP LOSS")
+        # If Stop Loss triggered, force action to Sell All (-holdings)
+        # This overrides whatever the agent wanted to do for that asset
+        actions_final = np.where(sl_hit_mask, -np.array(holdings), trading_actions)
+
+        # Clip sell actions to holdings (cannot sell more than we have)
+        actions_final = np.maximum(actions_final, -np.array(holdings))
 
         # -----------------------------------------------------------------------
         # UPDATE STATE (CASH & HOLDINGS) from Action Execution
         # -----------------------------------------------------------------------
         # Sells
-        sells = -np.clip(actions, -np.inf, 0)
+        sells = -np.clip(actions_final, -np.inf, 0)
         proceeds = np.dot(sells, current_closings)
         costs = proceeds * self.sell_cost_pct
         coh = begin_cash + proceeds
 
         # Buys
-        buys = np.clip(actions, 0, np.inf)
+        buys = np.clip(actions_final, 0, np.inf)
         spend = np.dot(buys, current_closings)
         costs += spend * self.buy_cost_pct
 
         # Cash Shortage Logic
+        # (If we overspend, we kill the buy side)
         if (spend + costs) > coh:
             if self.patient:
                 self.log_step(reason="CASH SHORTAGE")
-                actions = np.where(actions > 0, 0, actions)
+                # Force buy actions to 0, keep sell actions
+                actions_final = np.where(actions_final > 0, 0, actions_final)
                 spend = 0
-                costs = 0
+                # Recalculate costs for just sells
+                sells = -np.clip(actions_final, -np.inf, 0)
+                proceeds = np.dot(sells, current_closings)
+                costs = proceeds * self.sell_cost_pct
+                # Recalculate coh
+                coh = begin_cash + proceeds
             else:
-                self.transaction_memory.append(actions)
+                self.transaction_memory.append(actions_final)
                 return self.return_terminal(reason="CASH SHORTAGE", reward=0)  # Small penalty for dying
 
-        self.transaction_memory.append(actions)
+        self.transaction_memory.append(actions_final)
 
         # Verify valid trade
-        assert (spend + costs) <= coh
+        assert (spend + costs) <= coh + 1e-5  # Float tolerance
 
         # Update actual holdings and cash
         coh = coh - spend - costs
-        holdings_updated = holdings + actions
+        holdings_updated = holdings + actions_final
 
-        # Update Average Buy Price
-        # buys_sign = np.sign(buys)
-        # self.n_buys += buys_sign
-        # safe_n_buys = np.where(self.n_buys > 0, self.n_buys, 1)
-        # self.avg_buy_price = np.where(
-        #     buys_sign > 0,
-        #     self.avg_buy_price + ((current_closings - self.avg_buy_price) / safe_n_buys),
-        #     self.avg_buy_price,
-        # )
-        # self.n_buys = np.where(holdings_updated > 0, self.n_buys, 0)
-        # self.avg_buy_price = np.where(holdings_updated > 0, self.avg_buy_price, 0)
+        # Update Average Buy Price (Weighted Average)
+        # 1. If we bought (buys > 0), update WAP
+        #    New_WAP = (Old_Holdings * Old_WAP + Buy_Amount * Current_Price) / New_Holdings
+        # 2. If we sold or held, WAP stays same.
+        # 3. If holdings go to 0, WAP resets to 0.
+
+        buys_mask = actions_final > 0
+        if np.any(buys_mask):
+            # Calculate cost of new buys for the masked assets
+            # (Note: 'buys' array has positive values for buys, 0 otherwise)
+            # We need per-asset cost, so we multiply element-wise
+            new_cost_basis = buys * current_closings 
+            
+            # Numerator: (Old_WAP * Old_Holdings) + New_Cost
+            # We use max(holdings, 0) to avoid any weirdness if we somehow had negative holdings (shouldn't happen)
+            numerator = (self.avg_buy_price * holdings) + new_cost_basis
+            
+            # Denominator: New total holdings
+            denominator = holdings_updated
+            
+            # Update only where we bought
+            # Avoid division by zero if somehow holdings_updated is 0 (unlikely if we just bought, but safety first)
+            safe_denom = np.where(denominator == 0, 1, denominator) 
+            new_waps = numerator / safe_denom
+            
+            self.avg_buy_price = np.where(buys_mask, new_waps, self.avg_buy_price)
+
+        # Reset WAP to 0 where we have no holdings
+        self.avg_buy_price = np.where(holdings_updated == 0, 0, self.avg_buy_price)
 
         # Update log counters
         # self.actual_num_trades = np.sum(np.abs(np.sign(actions)))

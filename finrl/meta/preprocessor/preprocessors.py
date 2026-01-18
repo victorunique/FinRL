@@ -187,20 +187,19 @@ class FeatureEngineer:
             
         df = df.sort_values(["date", "tic"], ignore_index=True)
         df.index = df.date.factorize()[0]
+        
+        # Use pivot table to align dates and tickers
         merged_closes = df.pivot_table(index="date", columns="tic", values="close")
-        merged_closes = merged_closes.dropna(axis=1)
+        
+        # Forward fill missing values to handle gaps in minute-level data
+        merged_closes = merged_closes.ffill().bfill()
+        
+        # Only drop columns that are still completely empty (if any)
+        merged_closes = merged_closes.dropna(axis=1, how='all')
+        
         tics = merged_closes.columns
         df = df[df.tic.isin(tics)]
-        # df = data.copy()
-        # list_ticker = df["tic"].unique().tolist()
-        # only apply to daily level data, need to fix for minute level
-        # list_date = list(pd.date_range(df['date'].min(),df['date'].max()).astype(str))
-        # combination = list(itertools.product(list_date,list_ticker))
-
-        # df_full = pd.DataFrame(combination,columns=["date","tic"]).merge(df,on=["date","tic"],how="left")
-        # df_full = df_full[df_full['date'].isin(df['date'])]
-        # df_full = df_full.sort_values(['date','tic'])
-        # df_full = df_full.fillna(0)
+        
         return df
 
     def add_technical_indicator(self, data):
@@ -242,9 +241,6 @@ class FeatureEngineer:
         columns_to_keep = [col for col in columns_to_keep if col in final_df.columns]
         
         return final_df[columns_to_keep]
-        # df = data.set_index(['date','tic']).sort_index()
-        # df = df.join(df.groupby(level=0, group_keys=False).apply(lambda x, y: Sdf.retype(x)[y], y=self.tech_indicator_list))
-        # return df.reset_index()
 
     def add_user_defined_feature(self, data):
         """
@@ -254,10 +250,6 @@ class FeatureEngineer:
         """
         df = data.copy()
         df["daily_return"] = df.close.pct_change(1)
-        # df['return_lag_1']=df.close.pct_change(2)
-        # df['return_lag_2']=df.close.pct_change(3)
-        # df['return_lag_3']=df.close.pct_change(4)
-        # df['return_lag_4']=df.close.pct_change(5)
         return df
 
     def add_vix(self, data):
@@ -273,16 +265,28 @@ class FeatureEngineer:
             df['date'] = pd.to_datetime(df['date'])
             
         # Get min and max dates as strings YYYY-MM-DD for YahooDownloader
-        start_date = df.date.min().strftime("%Y-%m-%d")
+        # Fetch extra history to account for the shift
+        start_date = (df.date.min() - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
         end_date = (df.date.max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
         
         # Fetch VIX data
-        df_vix = YahooDownloader(
-            start_date=start_date, end_date=end_date, ticker_list=["^VIX"]
-        ).fetch_data()
+        print(f"Fetching VIX data from {start_date} to {end_date}...")
+        try:
+            df_vix = YahooDownloader(
+                start_date=start_date, end_date=end_date, ticker_list=["^VIX"]
+            ).fetch_data()
+        except Exception as e:
+            print(f"Error fetching VIX data: {e}. proceed without VIX.")
+            return df
         
-        vix = df_vix[["date", "close"]]
+        vix = df_vix[["date", "close"]].copy()
         vix.columns = ["date", "vix"]
+        
+        # Shift VIX by 1 day to use previous day's close (avoid look-ahead bias)
+        vix['vix'] = vix['vix'].shift(1)
+        # Drop the first row which is now NaN after shift
+        vix = vix.dropna()
+
         # Ensure VIX date is datetime for merging
         vix['date'] = pd.to_datetime(vix['date'])
 
