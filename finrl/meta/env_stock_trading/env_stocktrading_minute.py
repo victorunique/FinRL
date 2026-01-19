@@ -44,6 +44,8 @@ class StockTradingEnvMinute(gym.Env):
         patient=False,
         currency="$",
         episode_length=-1,
+        reward_weight_pnl=1.0,
+        reward_weight_drawdown=0.5,
     ):
         self.df = df
         self.stock_col = "tic"
@@ -92,6 +94,8 @@ class StockTradingEnvMinute(gym.Env):
         self.cache_indicator_data = cache_indicator_data
         self.cached_data = None
         self.cash_penalty_proportion = cash_penalty_proportion
+        self.reward_weight_pnl = reward_weight_pnl
+        self.reward_weight_drawdown = reward_weight_drawdown
         if self.cache_indicator_data:
             print("caching data...")
             # Optimization: Unified 3D Cache
@@ -186,6 +190,8 @@ class StockTradingEnvMinute(gym.Env):
             "total_assets": [self.initial_amount],
             "reward": [0],
         }
+        # Initialize peak_total_assets for drawdown calculation
+        self.peak_total_assets = self.initial_amount
         init_state = np.array(
             [self.initial_amount]
             + [0] * len(self.assets)
@@ -466,9 +472,25 @@ class StockTradingEnvMinute(gym.Env):
         new_asset_value = np.dot(holdings_updated, new_closings)
         new_total_assets = coh + new_asset_value
 
-        # Reward = Percentage Change in Total Assets
-        # Multiply by 1000 to make the scale significant for the agent
-        reward = ((new_total_assets - prev_total_assets) / prev_total_assets) * 1000
+        # -----------------------------------------------------------------------
+        # REWARD CALCULATION with PnL and Drawdown components
+        # -----------------------------------------------------------------------
+        # Component 1: PnL (Percentage Change in Total Assets)
+        pnl_reward = ((new_total_assets - prev_total_assets) / prev_total_assets) * 1000
+
+        # Component 2: Drawdown Penalty
+        # Update peak total assets (high-water mark)
+        self.peak_total_assets = max(self.peak_total_assets, new_total_assets)
+        
+        # Calculate current drawdown as percentage from peak
+        # Drawdown is always non-positive (0 when at peak, negative when below)
+        drawdown = (new_total_assets - self.peak_total_assets) / self.peak_total_assets
+        drawdown_penalty = drawdown * 1000  # Scale to match PnL reward magnitude
+
+        # Combined reward with configurable weights
+        # reward_weight_pnl (w1): weight for PnL component
+        # reward_weight_drawdown (w2): weight for drawdown penalty
+        reward = (self.reward_weight_pnl * pnl_reward) + (self.reward_weight_drawdown * drawdown_penalty)
 
         # Update Memory
         self.account_information["cash"].append(coh)

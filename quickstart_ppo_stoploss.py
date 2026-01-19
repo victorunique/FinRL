@@ -215,12 +215,15 @@ def main():
 
     agent = DRLAgent(env=e_train_stacked)
 
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif torch.backends.mps.is_available():
-        device = "mps"
-    else:
-        device = "cpu"
+    # PPO's policy networks are relatively small, and the overhead of transferring data between 
+    # CPU and GPU actually makes training slower on GPU. Only CNN-based policies that process 
+    # raw pixels (like Atari games) benefit from GPU acceleration.
+    # if torch.cuda.is_available():
+    #     device = "cuda"
+    # elif torch.backends.mps.is_available():
+    #     device = "mps"
+    # else:
+    device = "cpu"
     print(f"Using device: {device}")
 
     PPO_PARAMS = {

@@ -11,7 +11,7 @@ from finrl import config_tickers
 PREPROCESSED_DATA_DIR = "preprocessed_data"
 RESULTS_DIR = "results"
 INITIAL_AMOUNT = 1000000
-TRANSACTION_COST_PCT = 0.001  # 0.1%
+TRANSACTION_COST_PCT = 0.0001  # 0.01%
 
 
 def calculate_max_drawdown(series):
