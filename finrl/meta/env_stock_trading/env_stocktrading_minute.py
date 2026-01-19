@@ -85,7 +85,7 @@ class StockTradingEnvMinute(gym.Env):
         self.action_space = spaces.Box(low=low, high=high, shape=(action_dim,), dtype=np.float32)
         
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.state_space,)
+            low=-np.inf, high=np.inf, shape=(self.state_space,), dtype=np.float32
         )
 
         self.episode = -1  # initialize so we can call reset
